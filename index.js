@@ -62,6 +62,8 @@ async.waterfall([
                 return jshint.supportedFiletypes.indexOf(path.extname(reviewItem.path)) !== -1;
             });
 
+            reviews[reviewKey] = review;
+
             async.map(review, function (reviewItem, mapCallback) {
                 crucible.getFileContents(reviewItem.path, mapCallback);
             }, function (err, result) {
