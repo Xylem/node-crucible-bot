@@ -19,79 +19,66 @@ async.waterfall([
     },
     function getOpenReviews(getOpenReviewsCallback) {
         crucible.getOpenReviews(function (err, reviewsData) {
-            var reviewKeys = reviewsData.reviewData.map(function (review) {
+            var reviewIds = reviewsData.reviewData.map(function (review) {
                 return review.permaId.id;
             });
 
-            getOpenReviewsCallback(null, reviewKeys);
+            getOpenReviewsCallback(null, reviewIds);
         });
     },
-    function getReviewItems(reviewKeys, getReviewItemsCallback) {
-        async.map(reviewKeys, crucible.getReviewItems, function (err, reviewItemsArray) {
-            var items = {};
+    function getReviewItems(reviewIds, getReviewItemsCallback) {
+        var reviewItemsArray = [];
 
-            reviewItemsArray = reviewItemsArray.map(function (reviewItems) {
-                return reviewItems.reviewItem.filter(function (reviewItem) {
-                    var lastRevision = reviewItem.expandedRevisions[reviewItem.expandedRevisions.length - 1];
-
-                    return lastRevision.fileType === "File" && (lastRevision.commitType === "Modified" || lastRevision.commitType === "Added");
-                }).map(function (reviewItem) {
-                        var lastRevision = reviewItem.expandedRevisions[reviewItem.expandedRevisions.length - 1];
-
-                        return {
-                            id: reviewItem.permId.id,
-                            revision: lastRevision.revision,
-                            path: lastRevision.contentUrl
-                        };
-                    });
-            });
-
-            for (var i = 0; i < reviewKeys.length; ++i) {
-                items[reviewKeys[i]] = reviewItemsArray[i];
-            }
-
-            getReviewItemsCallback(null, items);
-        });
-    },
-    function getFileContents(reviews, getFileContentsCallback) {
-        async.each(Object.keys(reviews), function (reviewKey, reviewsMapCallback) {
-            var review = reviews[reviewKey];
-
-            //TODO check all validators
-            review = review.filter(function (reviewItem) {
-                return jshint.supportedFiletypes.indexOf(path.extname(reviewItem.path)) !== -1;
-            });
-
-            reviews[reviewKey] = review;
-
-            async.map(review, function (reviewItem, mapCallback) {
-                crucible.getFileContents(reviewItem.path, mapCallback);
-            }, function (err, result) {
-                for (var i = 0; i < result.length; ++i) {
-                    reviews[reviewKey][i].file = result[i];
+        async.each(reviewIds, function (reviewId, reviewItemsFetchedCallback) {
+            crucible.getReviewItems(reviewId, function (err, reviewItems) {
+                if (err) {
+                    reviewItemsFetchedCallback(err);
+                    return;
                 }
 
-                reviewsMapCallback(err, review);
+                reviewItems.reviewItem.forEach(function (reviewItem) {
+                    var lastRevision = reviewItem.expandedRevisions[reviewItem.expandedRevisions.length - 1];
+
+                    if (lastRevision.fileType === "File" && (lastRevision.commitType === "Modified" || lastRevision.commitType === "Added" || lastRevision.commitType === "Moved")) {
+                        reviewItemsArray.push({
+                            id: reviewItem.permId.id,
+                            reviewId: reviewId,
+                            revision: lastRevision.revision,
+                            path: lastRevision.contentUrl
+                        });
+                    }
+                });
+
+                reviewItemsFetchedCallback();
             });
         }, function (err) {
-            getFileContentsCallback(err, reviews);
+            getReviewItemsCallback(err, reviewItemsArray);
         });
     },
-    function validateAndPostComments(reviews, validateAndPostCommentsCallback) {
-        async.each(Object.keys(reviews), function (reviewKey, reviewsEachCallback) {
-            var review = reviews[reviewKey];
+    function getFileContents(reviewItems, getFileContentsCallback) {
+        reviewItems = reviewItems.filter(function (reviewItem) {
+            return jshint.supportedFiletypes.indexOf(path.extname(reviewItem.path)) !== -1;
+        });
 
-            //TODO validate with all available validators
-            async.each(review, function (reviewItem, eachCallback) {
-                var errors = jshint.validate(reviewItem.file);
+        async.each(reviewItems, function (reviewItem, fileRetrievedCallback) {
+            crucible.getFileContents(reviewItem.path, function (err, data) {
+                reviewItem.file = data;
 
-                async.each(errors, function (error, postCommentDone) {
-                    crucible.postComment(reviewKey, reviewItem.id, reviewItem.revision, error.line, error.message, postCommentDone)
-                }, function (err) {
-                    eachCallback(err);
-                });
+                fileRetrievedCallback(err);
+            });
+        }, function (err) {
+            getFileContentsCallback(err, reviewItems);
+        });
+    },
+    function validateAndPostComments(reviewItems, validateAndPostCommentsCallback) {
+        //TODO validate with all available validators
+        async.each(reviewItems, function (reviewItem, eachCallback) {
+            var errors = jshint.validate(reviewItem.file);
+
+            async.each(errors, function (error, postCommentDone) {
+                crucible.postComment(reviewItem.reviewId, reviewItem.id, reviewItem.revision, error.line, error.message, postCommentDone)
             }, function (err) {
-                reviewsEachCallback(err);
+                eachCallback(err);
             });
         }, function (err) {
             validateAndPostCommentsCallback(err);
