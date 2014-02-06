@@ -1,0 +1,11 @@
+{
+    "name": "node-crucible-bot",
+    "version": "0.0.1",
+    "dependencies": {
+        "config": "0.4.x",
+        "node-rest-client": "0.7.x",
+        "jshint": "2.4.x",
+        "http-status": "0.1.x",
+        "async": "0.2.x"
+    }
+}
