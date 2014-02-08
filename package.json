@@ -1,6 +1,6 @@
 {
     "name": "node-crucible-bot",
-    "version": "0.0.1",
+    "version": "0.0.2",
     "dependencies": {
         "config": "0.4.x",
         "node-rest-client": "0.7.x",
